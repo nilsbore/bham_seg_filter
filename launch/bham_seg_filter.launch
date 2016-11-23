@@ -1,0 +1,5 @@
+<launch>
+
+	<node name="bham_seg_filter" pkg="bham_seg_filter" respawn="true" type="bham_seg_filter_node" output="screen"/>
+
+</launch>
