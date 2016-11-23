@@ -19,7 +19,7 @@ def callback(msg):
 
 if __name__ == '__main__':
     rospy.init_node('CT_TEST_NODE', anonymous = True)
-    rospy.Subscriber("/willthiswork", PointCloud2, callback)
+    rospy.Subscriber("/bham_filtered_segmentation/ransac_filtered_cloud", PointCloud2, callback)
 
     print("loading pcd")
     pcd = python_pcd.read_pcd("0.pcd")
@@ -27,9 +27,27 @@ if __name__ == '__main__':
     rospy.wait_for_service('/bham_filtered_segmentation/segment')
     df = rospy.ServiceProxy('/bham_filtered_segmentation/segment',bham_seg)
     print("done")
-    df(cloud=pcd[0])
+    o = df(cloud=pcd[0])
     print("done!")
+    print("got this many clusters: " + str(len(o.clusters_indices)))
+
+    int_data = list(pc2.read_points(pcd[0]))
+    filtered_clusters = []
+    indices = o.clusters_indices
+    for cluster in indices:
+        print 'cluster has %f points' %len(cluster.data)
+        if(len(cluster.data) > 500 and len(cluster.data) < 5000):
+            ic = []
+            for point in cluster.data:
+                ic.append(int_data[point])
+            filtered_clusters.append(ic)
 
 
+    print 'filtered clusters: %d' %len(filtered_clusters)
+
+    for k in filtered_clusters:
+        print("writing file")
+        cld = pc2.create_cloud(pcd[0].header, pcd[0].fields, k)
+        python_pcd.write_pcd(str("segment_"+filtered_clusters.index(k))+".pcd",cld,overwrite=True)
 
     rospy.spin()

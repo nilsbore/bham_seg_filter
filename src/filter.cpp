@@ -48,9 +48,9 @@ using namespace sensor_msgs;
 sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud)
 {
   ROS_INFO("Doing RANSAC filter");
-  pcl::PCDWriter writer;
+  //pcl::PCDWriter writer;
   pcl::PCLPointCloud2 pcl_pc2;
-
+  ros::NodeHandle nh;
   pcl_conversions::toPCL(input_cloud,pcl_pc2);
 
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -144,15 +144,19 @@ sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud)
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
   // do ransac stuff
+
+
   pcl::ExtractIndices<pcl::PointXYZRGB> extract;
   extract.setInputCloud (temp_cloud);
   extract.setIndices (inliers);
   extract.setNegative (true);
-  extract.filter (*filtered_cloud);
+  extract.setKeepOrganized(true);
+  extract.filter(*filtered_cloud);
+
 
 //  sensor_msgs::Image image_;
 //  sensor_msgs::PointCloud2 pc;
-  writer.write<pcl::PointXYZRGB> ("filtered.pcd", *filtered_cloud, false);
+//  writer.write<pcl::PointXYZRGB> ("filtered.pcd", *filtered_cloud, false);
   sensor_msgs::PointCloud2 output_cloud;
   pcl::toROSMsg(*filtered_cloud,output_cloud);
 
@@ -190,6 +194,15 @@ sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud)
     r.sleep();
   }
 */
+  ros::Publisher image_pub_ = nh.advertise<sensor_msgs::PointCloud2> ("/bham_filtered_segmentation/ransac_filtered_cloud", 30);
+  ros::Rate r(10); // 10 hz
+  int i = 0;
+  while(i < 10) {
+    i++;
+    ROS_INFO("Publishing");
+    image_pub_.publish (output_cloud);
+    r.sleep();
+  }
 
   return output_cloud;
 }
@@ -198,10 +211,20 @@ bool segment_cb(
 bham_seg_filter::bham_seg::Request &req, // phew! what a mouthful!
 bham_seg_filter::bham_seg::Response &res)
 {
+  ros::NodeHandle nh;
   ROS_INFO("Received service call");
   sensor_msgs::PointCloud2 filtered_cloud = ransac_filter(req.cloud);
 
-  //ros::ServiceClient client = n.serviceClient<beginner_tutorials::AddTwoInts>("add_two_ints");
+  ros::ServiceClient vienna_seg = nh.serviceClient<segmentation_srv_definitions::segment>("/object_gestalt_segmentation");
+
+  segmentation_srv_definitions::segment srv;
+  srv.request.cloud = filtered_cloud;
+  if (vienna_seg.call(srv)) {
+    ROS_INFO("v4r seg called successfully!");
+    res.clusters_indices = srv.response.clusters_indices;
+  }  else  {
+    ROS_ERROR("Failed to call service object_gestalt_segmentation");
+  }
 
 
   return true;
