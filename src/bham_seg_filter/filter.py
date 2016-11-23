@@ -1,4 +1,7 @@
-import pcl
+#!/usr/bin/env python
+import roslib
+import rospy
+
 import python_pcd
 from sensor_msgs.msg import PointCloud2
 import std_msgs
@@ -12,6 +15,8 @@ import uuid
 import python_pcd
 from bham_seg_filter.srv import *
 from segmentation_srv_definitions.srv import *
+from geometry_msgs.msg import *
+
 
 def callback(msg):
     print("got msg")
@@ -22,12 +27,22 @@ if __name__ == '__main__':
     rospy.Subscriber("/bham_filtered_segmentation/ransac_filtered_cloud", PointCloud2, callback)
 
     print("loading pcd")
-    pcd = python_pcd.read_pcd("0.pcd")
+    pcd = python_pcd.read_pcd("2.pcd")
+
+
     print("waiting for service")
     rospy.wait_for_service('/bham_filtered_segmentation/segment')
     df = rospy.ServiceProxy('/bham_filtered_segmentation/segment',bham_seg)
     print("done")
-    o = df(cloud=pcd[0])
+    p = geometry_msgs.msg.PoseArray()
+    pp = geometry_msgs.msg.Pose()
+    pp.position.x = 0
+    pp.position.y = 0
+    pp.position.z = 0
+    p.poses.append(pp)
+
+
+    o = df(cloud=pcd[0],posearray=p)
     print("done!")
     print("got this many clusters: " + str(len(o.clusters_indices)))
 
@@ -36,7 +51,7 @@ if __name__ == '__main__':
     indices = o.clusters_indices
     for cluster in indices:
         print 'cluster has %f points' %len(cluster.data)
-        if(len(cluster.data) > 500 and len(cluster.data) < 5000):
+        if(len(cluster.data) > 200 and len(cluster.data) < 10000):
             ic = []
             for point in cluster.data:
                 ic.append(int_data[point])
@@ -48,6 +63,6 @@ if __name__ == '__main__':
     for k in filtered_clusters:
         print("writing file")
         cld = pc2.create_cloud(pcd[0].header, pcd[0].fields, k)
-        python_pcd.write_pcd(str("segment_"+filtered_clusters.index(k))+".pcd",cld,overwrite=True)
+        python_pcd.write_pcd(str("segment_"+str(filtered_clusters.index(k)))+".pcd",cld,overwrite=True)
 
     rospy.spin()

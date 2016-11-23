@@ -38,12 +38,47 @@
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/range_image/range_image.h>
-
-
+#include <pcl/filters/crop_hull.h>
+#include <pcl/surface/convex_hull.h>
 
 using namespace std;
 using namespace sensor_msgs;
 #include <pcl/filters/passthrough.h>
+
+sensor_msgs::PointCloud2 roi_crop(sensor_msgs::PointCloud2 input_cloud, geometry_msgs::PoseArray posearray) {
+  ROS_INFO("Doing ROI Cropping filter");
+  ros::NodeHandle nh;
+
+  pcl::PCLPointCloud2 pcl_pc2;
+
+  pcl_conversions::toPCL(input_cloud,pcl_pc2);
+  ROS_INFO("Doing this");
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+  pcl::fromPCLPointCloud2(pcl_pc2,*temp_cloud);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr surface_hull (new pcl::PointCloud<pcl::PointXYZ>);
+  ROS_INFO("Doing this");
+  pcl::PointCloud<pcl::PointXYZ>::Ptr boundingbox_ptr (new pcl::PointCloud<pcl::PointXYZ>);
+  boundingbox_ptr->push_back(pcl::PointXYZ(0, 2, -1));
+  boundingbox_ptr->push_back(pcl::PointXYZ(1, 2, 0));
+  boundingbox_ptr->push_back(pcl::PointXYZ(4, 2, -1));
+  ROS_INFO("Doing this");
+
+  pcl::ConvexHull<pcl::PointXYZ> hull;
+  hull.setInputCloud(boundingbox_ptr);
+  hull.setDimension(2);
+  std::vector<pcl::Vertices> polygons;
+  hull.reconstruct(*surface_hull,polygons);
+  ROS_INFO("Doing this");
+  pcl::CropHull<pcl::PointXYZRGB> bb_filter;
+  bb_filter.setInputCloud(temp_cloud);
+  bb_filter.setHullIndices(polygons);
+  bb_filter.setKeepOrganized(true);
+  ROS_INFO("now trying to filter");
+  bb_filter.filter(*output_cloud);
+
+  return input_cloud;
+}
 
 sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud)
 {
@@ -207,13 +242,21 @@ sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud)
   return output_cloud;
 }
 
+
+
 bool segment_cb(
 bham_seg_filter::bham_seg::Request &req, // phew! what a mouthful!
 bham_seg_filter::bham_seg::Response &res)
 {
   ros::NodeHandle nh;
   ROS_INFO("Received service call");
-  sensor_msgs::PointCloud2 filtered_cloud = ransac_filter(req.cloud);
+  //sensor_msgs::PointCloud2 roi_filtered_cloud = roi_crop(req.cloud,req.posearray);
+
+  tf::TransformListener *tf_listener = new tf::TransformListener();
+  sensor_msgs::PointCloud2 cloud_out;
+  pcl_ros::transformPointCloud("/map",req.cloud,cloud_out,*tf_listener);
+
+  sensor_msgs::PointCloud2 filtered_cloud = ransac_filter(cloud_out);
 
   ros::ServiceClient vienna_seg = nh.serviceClient<segmentation_srv_definitions::segment>("/object_gestalt_segmentation");
 

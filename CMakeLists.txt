@@ -5,6 +5,7 @@ project(bham_seg_filter)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  geometry_msgs
   roscpp
   rospy
   sensor_msgs
@@ -108,7 +109,7 @@ generate_messages(
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES initial_surface_view_evaluation
-  CATKIN_DEPENDS message_runtime 
+  CATKIN_DEPENDS message_runtime
 #  DEPENDS system_lib
 )
 
