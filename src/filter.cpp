@@ -39,7 +39,7 @@
 #include <pcl/range_image/range_image.h>
 #include <pcl/filters/crop_hull.h>
 #include <pcl/surface/convex_hull.h>
-
+#include <pcl/filters/crop_box.h>
 using namespace std;
 using namespace sensor_msgs;
 #include <pcl/filters/passthrough.h>
@@ -50,6 +50,7 @@ using namespace sensor_msgs;
 class SegmentFilter{
   tf::TransformListener listener;
   ros::NodeHandle* node;
+  ros::Publisher plane_pub;
   public:
      sensor_msgs::PointCloud2 roi_crop(sensor_msgs::PointCloud2 input_cloud, geometry_msgs::PoseArray posearray);
      sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud);
@@ -61,11 +62,13 @@ SegmentFilter::SegmentFilter(){
   ROS_INFO("Loaded Filter Class");
 
   node = new ros::NodeHandle ("~");
-  ROS_INFO("letting TF breathe");
+  ROS_INFO("letting TF breathe before starting the service");
   ros::Duration(5.0).sleep();
 
   ROS_INFO("Setting up services");
   ros::ServiceServer conversion_service = node->advertiseService("/bham_filtered_segmentation/segment", &SegmentFilter::segment_cb,this);
+  plane_pub =  node->advertise<sensor_msgs::PointCloud2> ("/bham_filtered_segmentation/ransac_plane_estimate", 5);
+  ros::Rate r(10);
   ROS_INFO("Done, ready to go");
 
   ros::spin();
@@ -78,32 +81,33 @@ sensor_msgs::PointCloud2 SegmentFilter::roi_crop(sensor_msgs::PointCloud2 input_
   pcl::PCLPointCloud2 pcl_pc2;
 
   pcl_conversions::toPCL(input_cloud,pcl_pc2);
-  ROS_INFO("Doing this");
+  ROS_INFO("Doing CROP BOX");
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
   pcl::fromPCLPointCloud2(pcl_pc2,*temp_cloud);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr surface_hull (new pcl::PointCloud<pcl::PointXYZ>);
-  ROS_INFO("Doing this");
-  pcl::PointCloud<pcl::PointXYZ>::Ptr boundingbox_ptr (new pcl::PointCloud<pcl::PointXYZ>);
-  boundingbox_ptr->push_back(pcl::PointXYZ(0, 2, -1));
-  boundingbox_ptr->push_back(pcl::PointXYZ(1, 2, 0));
-  boundingbox_ptr->push_back(pcl::PointXYZ(4, 2, -1));
-  ROS_INFO("Doing this");
 
-  pcl::ConvexHull<pcl::PointXYZ> hull;
-  hull.setInputCloud(boundingbox_ptr);
-  hull.setDimension(2);
-  std::vector<pcl::Vertices> polygons;
-  hull.reconstruct(*surface_hull,polygons);
-  ROS_INFO("Doing this");
-  pcl::CropHull<pcl::PointXYZRGB> bb_filter;
-  bb_filter.setInputCloud(temp_cloud);
-  bb_filter.setHullIndices(polygons);
-  bb_filter.setKeepOrganized(true);
-  ROS_INFO("now trying to filter");
-  bb_filter.filter(*output_cloud);
+  pcl::PointCloud<pcl::PointXYZRGB> xyz_filtered_cloud;
+  pcl::CropBox<pcl::PointXYZRGB> crop;
+  crop.setInputCloud(temp_cloud);
+  ROS_INFO("Almost there");
 
-  return input_cloud;
+  std::cout << " MIN X: " << posearray.poses[0].position.x << " MIN Y" << posearray.poses[0].position.y << std::endl;
+  std::cout << " MAX X: " << posearray.poses[1].position.x << " MAX Y" << posearray.poses[1].position.y << std::endl;
+
+
+  Eigen::Vector4f min_point = Eigen::Vector4f(posearray.poses[0].position.x, posearray.poses[0].position.y, 0, 0);
+  Eigen::Vector4f max_point = Eigen::Vector4f(posearray.poses[1].position.x, posearray.poses[1].position.y, 10, 0);
+  crop.setMin(min_point);
+  crop.setMax(max_point);
+  crop.setNegative(false);
+  crop.setKeepOrganized(true);
+  crop.filter(xyz_filtered_cloud);
+  pcl::PCDWriter writer;
+  writer.write<pcl::PointXYZRGB> ("crop.pcd", xyz_filtered_cloud, false);
+  ROS_INFO("DONE  CROP BOX");
+  sensor_msgs::PointCloud2 output_cloud;
+  pcl::toROSMsg(xyz_filtered_cloud,output_cloud);
+
+  return output_cloud;
 }
 
 sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 input_cloud)
@@ -203,6 +207,7 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
   std::cerr << "Model inliers: " << inliers->indices.size () << std::endl;
 
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_plane(new pcl::PointCloud<pcl::PointXYZRGB>);
 
   // do ransac stuff
 
@@ -214,6 +219,14 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
   extract.setKeepOrganized(true);
   extract.filter(*filtered_cloud);
 
+  pcl::ExtractIndices<pcl::PointXYZRGB> extract_plane;
+  extract.setInputCloud (temp_cloud);
+  extract.setIndices (inliers);
+  extract.setNegative (false);
+  extract.filter(*filtered_plane);
+  sensor_msgs::PointCloud2 pc;
+  pcl::toROSMsg (*filtered_plane, pc);
+  plane_pub.publish(pc);
 
 //  sensor_msgs::Image image_;
 //  sensor_msgs::PointCloud2 pc;
@@ -255,6 +268,8 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
     r.sleep();
   }
 */
+
+/*
   ros::Publisher image_pub_ = node->advertise<sensor_msgs::PointCloud2> ("/bham_filtered_segmentation/ransac_filtered_cloud", 30);
   ros::Rate r(10); // 10 hz
   int i = 0;
@@ -264,7 +279,7 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
     image_pub_.publish (output_cloud);
     r.sleep();
   }
-
+*/
   return output_cloud;
 }
 
@@ -276,36 +291,53 @@ bham_seg_filter::bham_seg::Response &res)
 {
   //ros::NodeHandle nh;
   ROS_INFO("Received service call");
-  //sensor_msgs::PointCloud2 roi_filtered_cloud = roi_crop(req.cloud,req.posearray);
 
    //sensor_msgs::PointCloud2 pcd = *ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/head_xtion/depth_registered/points", ros::Duration(5));
    //req.cloud = pcd;
-  ROS_INFO("glt cld");
-
    const std::string& target("map");
    const std::string& root(req.cloud.header.frame_id);
-   ros::Time current_transform = ros::Time(0);
+   ros::Time current_transform = ros::Time::now();
    tf::StampedTransform transform;
-   sensor_msgs::PointCloud2 out_cloud;
+   pcl::PointCloud<pcl::PointXYZRGB> out_cloud;
+   sensor_msgs::PointCloud2 new_out_cloud;
    ROS_INFO("WAITING");
-   listener.waitForTransform("map", root, current_transform, ros::Duration(10.0) );
+   std::cout<< "TARGET:" << target << std::endl;
+   std::cout<< "ORIGIN:" << root << std::endl;
+
+   listener.waitForTransform(target, root, current_transform, ros::Duration(10.0) );
   // std::string err;
 
   std::string* err;
 
+   listener.lookupTransform(root, target, current_transform, transform);
+   ROS_INFO("TRANSFORMING");
 
-   int ct = listener.getLatestCommonTime(root,target,current_transform,err);
-   std::cout << "LATEST COMMON TIME:" << ct << std::endl;
+   pcl::PCLPointCloud2 pcl_pc2;
+   pcl_conversions::toPCL(req.cloud,pcl_pc2);
+   pcl::PointCloud<pcl::PointXYZRGB> temp_cloud;
+   //pcl::PointCloud<pcl::PointXYZRGB>::Ptr col_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+   pcl::fromPCLPointCloud2(pcl_pc2,temp_cloud);
 
-   listener.lookupTransform(target, root, ros::Time(ct), transform);
-   pcl_ros::transformPointCloud (target, req.cloud, out_cloud,listener);
+   //pcl_ros::transformPointCloud (temp_cloud, out_cloud, transform);
+  // pcl_ros::transformPointCloud (target, transform, req.cloud, out_cloud);
+  Eigen::Vector4f beforecentroid;
+  pcl::compute3DCentroid (temp_cloud, beforecentroid);
+  std::cout << " CENTROID BEFORE: " << beforecentroid[0] << " : " << beforecentroid[1] << " : " << beforecentroid[2] << " : " << beforecentroid[3] << std::endl;
 
-    ROS_INFO("done");
+  pcl_ros::transformPointCloud (target,temp_cloud,out_cloud, listener);
+  Eigen::Vector4f aftercentroid;
+  pcl::compute3DCentroid (out_cloud, aftercentroid);
+  std::cout << " CENTROID AFTER: " << aftercentroid[0] << " : " << aftercentroid[1] << " : " << aftercentroid[2] << " : " << aftercentroid[3] << std::endl;
 
-/*
-  sensor_msgs::PointCloud2 filtered_cloud = ransac_filter(cloud_out);
+  ROS_INFO("done");
+  pcl::toROSMsg(out_cloud,new_out_cloud);
 
-  ros::ServiceClient vienna_seg = nh.serviceClient<segmentation_srv_definitions::segment>("/object_gestalt_segmentation");
+  sensor_msgs::PointCloud2 roi_filtered_cloud = roi_crop(new_out_cloud,req.posearray);
+
+
+  sensor_msgs::PointCloud2 filtered_cloud = ransac_filter(roi_filtered_cloud);
+
+  ros::ServiceClient vienna_seg = node->serviceClient<segmentation_srv_definitions::segment>("/object_gestalt_segmentation");
 
   segmentation_srv_definitions::segment srv;
   srv.request.cloud = filtered_cloud;
@@ -315,7 +347,7 @@ bham_seg_filter::bham_seg::Response &res)
   }  else  {
     ROS_ERROR("Failed to call service object_gestalt_segmentation");
   }
-*/
+
 
   return true;
 }
