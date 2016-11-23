@@ -21,8 +21,8 @@
 #include <sensor_msgs/Image.h>
 #include "bham_seg_filter/bham_seg.h"
 #include "segmentation_srv_definitions/segment.h"
-
-
+//#include <tf2_ros/transform_listener.h>
+#include <geometry_msgs/TransformStamped.h>
 #include <pcl/io/pcd_io.h>
 
 
@@ -32,7 +32,6 @@
 #include <pcl/filters/extract_indices.h>
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/sample_consensus/sac_model_plane.h>
-#include <pcl/visualization/pcl_visualizer.h>
 #include <boost/thread/thread.hpp>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
@@ -45,9 +44,36 @@ using namespace std;
 using namespace sensor_msgs;
 #include <pcl/filters/passthrough.h>
 
-sensor_msgs::PointCloud2 roi_crop(sensor_msgs::PointCloud2 input_cloud, geometry_msgs::PoseArray posearray) {
+
+//tf::TransformListener listener;
+
+class SegmentFilter{
+  tf::TransformListener listener;
+  ros::NodeHandle* node;
+  public:
+     sensor_msgs::PointCloud2 roi_crop(sensor_msgs::PointCloud2 input_cloud, geometry_msgs::PoseArray posearray);
+     sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud);
+     bool segment_cb(bham_seg_filter::bham_seg::Request &req,bham_seg_filter::bham_seg::Response &res);
+     SegmentFilter();
+};
+
+SegmentFilter::SegmentFilter(){
+  ROS_INFO("Loaded Filter Class");
+
+  node = new ros::NodeHandle ("~");
+  ROS_INFO("letting TF breathe");
+  ros::Duration(5.0).sleep();
+
+  ROS_INFO("Setting up services");
+  ros::ServiceServer conversion_service = node->advertiseService("/bham_filtered_segmentation/segment", &SegmentFilter::segment_cb,this);
+  ROS_INFO("Done, ready to go");
+
+  ros::spin();
+}
+
+sensor_msgs::PointCloud2 SegmentFilter::roi_crop(sensor_msgs::PointCloud2 input_cloud, geometry_msgs::PoseArray posearray) {
   ROS_INFO("Doing ROI Cropping filter");
-  ros::NodeHandle nh;
+//  ros::NodeHandle nh;
 
   pcl::PCLPointCloud2 pcl_pc2;
 
@@ -80,12 +106,12 @@ sensor_msgs::PointCloud2 roi_crop(sensor_msgs::PointCloud2 input_cloud, geometry
   return input_cloud;
 }
 
-sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud)
+sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 input_cloud)
 {
   ROS_INFO("Doing RANSAC filter");
   //pcl::PCDWriter writer;
   pcl::PCLPointCloud2 pcl_pc2;
-  ros::NodeHandle nh;
+  //ros::NodeHandle nh;
   pcl_conversions::toPCL(input_cloud,pcl_pc2);
 
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr temp_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -229,7 +255,7 @@ sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud)
     r.sleep();
   }
 */
-  ros::Publisher image_pub_ = nh.advertise<sensor_msgs::PointCloud2> ("/bham_filtered_segmentation/ransac_filtered_cloud", 30);
+  ros::Publisher image_pub_ = node->advertise<sensor_msgs::PointCloud2> ("/bham_filtered_segmentation/ransac_filtered_cloud", 30);
   ros::Rate r(10); // 10 hz
   int i = 0;
   while(i < 10) {
@@ -244,18 +270,39 @@ sensor_msgs::PointCloud2 ransac_filter(sensor_msgs::PointCloud2 input_cloud)
 
 
 
-bool segment_cb(
+bool SegmentFilter::segment_cb(
 bham_seg_filter::bham_seg::Request &req, // phew! what a mouthful!
 bham_seg_filter::bham_seg::Response &res)
 {
-  ros::NodeHandle nh;
+  //ros::NodeHandle nh;
   ROS_INFO("Received service call");
   //sensor_msgs::PointCloud2 roi_filtered_cloud = roi_crop(req.cloud,req.posearray);
 
-  tf::TransformListener *tf_listener = new tf::TransformListener();
-  sensor_msgs::PointCloud2 cloud_out;
-  pcl_ros::transformPointCloud("/map",req.cloud,cloud_out,*tf_listener);
+   //sensor_msgs::PointCloud2 pcd = *ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/head_xtion/depth_registered/points", ros::Duration(5));
+   //req.cloud = pcd;
+  ROS_INFO("glt cld");
 
+   const std::string& target("map");
+   const std::string& root(req.cloud.header.frame_id);
+   ros::Time current_transform = ros::Time(0);
+   tf::StampedTransform transform;
+   sensor_msgs::PointCloud2 out_cloud;
+   ROS_INFO("WAITING");
+   listener.waitForTransform("map", root, current_transform, ros::Duration(10.0) );
+  // std::string err;
+
+  std::string* err;
+
+
+   int ct = listener.getLatestCommonTime(root,target,current_transform,err);
+   std::cout << "LATEST COMMON TIME:" << ct << std::endl;
+
+   listener.lookupTransform(target, root, ros::Time(ct), transform);
+   pcl_ros::transformPointCloud (target, req.cloud, out_cloud,listener);
+
+    ROS_INFO("done");
+
+/*
   sensor_msgs::PointCloud2 filtered_cloud = ransac_filter(cloud_out);
 
   ros::ServiceClient vienna_seg = nh.serviceClient<segmentation_srv_definitions::segment>("/object_gestalt_segmentation");
@@ -268,22 +315,15 @@ bham_seg_filter::bham_seg::Response &res)
   }  else  {
     ROS_ERROR("Failed to call service object_gestalt_segmentation");
   }
-
+*/
 
   return true;
 }
 
 int main (int argc, char** argv)
 {
+
   ros::init (argc, argv, "bham_filtered_segmentation");
-  ros::NodeHandle node;
-
-  //ros::NodeHandle node;
-
-  ROS_INFO("Setting up services");
-  ros::ServiceServer conversion_service = node.advertiseService("/bham_filtered_segmentation/segment", segment_cb);
-  ROS_INFO("Done, ready to go");
-
-  ros::spin();
+  SegmentFilter s;
   return 0;
 }

@@ -27,7 +27,7 @@ if __name__ == '__main__':
     rospy.Subscriber("/bham_filtered_segmentation/ransac_filtered_cloud", PointCloud2, callback)
 
     print("loading pcd")
-    pcd = python_pcd.read_pcd("2.pcd")
+    #pcd = python_pcd.read_pcd("2.pcd")
 
 
     print("waiting for service")
@@ -40,13 +40,15 @@ if __name__ == '__main__':
     pp.position.y = 0
     pp.position.z = 0
     p.poses.append(pp)
+    pcd = rospy.wait_for_message("/head_xtion/depth_registered/points",PointCloud2)
 
 
-    o = df(cloud=pcd[0],posearray=p)
+
+    o = df(cloud=pcd,posearray=p)
     print("done!")
     print("got this many clusters: " + str(len(o.clusters_indices)))
 
-    int_data = list(pc2.read_points(pcd[0]))
+    int_data = list(pc2.read_points(pcd))
     filtered_clusters = []
     indices = o.clusters_indices
     for cluster in indices:
@@ -62,7 +64,7 @@ if __name__ == '__main__':
 
     for k in filtered_clusters:
         print("writing file")
-        cld = pc2.create_cloud(pcd[0].header, pcd[0].fields, k)
+        cld = pc2.create_cloud(pcd.header, pcd.fields, k)
         python_pcd.write_pcd(str("segment_"+str(filtered_clusters.index(k)))+".pcd",cld,overwrite=True)
 
     rospy.spin()
