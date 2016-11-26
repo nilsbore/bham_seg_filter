@@ -49,7 +49,9 @@ using namespace sensor_msgs;
 
 class SegmentFilter{
   tf::TransformListener listener;
+  
   ros::NodeHandle* node;
+
   ros::Publisher plane_pub;
   public:
      sensor_msgs::PointCloud2 roi_crop(sensor_msgs::PointCloud2 input_cloud, geometry_msgs::PoseArray posearray);
@@ -101,8 +103,8 @@ sensor_msgs::PointCloud2 SegmentFilter::roi_crop(sensor_msgs::PointCloud2 input_
   crop.setNegative(false);
   crop.setKeepOrganized(true);
   crop.filter(xyz_filtered_cloud);
-  pcl::PCDWriter writer;
-  writer.write<pcl::PointXYZRGB> ("crop.pcd", xyz_filtered_cloud, false);
+//  pcl::PCDWriter writer;
+//  writer.write<pcl::PointXYZRGB> ("crop.pcd", xyz_filtered_cloud, false);
   ROS_INFO("DONE  CROP BOX");
   sensor_msgs::PointCloud2 output_cloud;
   pcl::toROSMsg(xyz_filtered_cloud,output_cloud);
@@ -294,23 +296,38 @@ bham_seg_filter::bham_seg::Response &res)
 
    //sensor_msgs::PointCloud2 pcd = *ros::topic::waitForMessage<sensor_msgs::PointCloud2>("/head_xtion/depth_registered/points", ros::Duration(5));
    //req.cloud = pcd;
-   const std::string& target("map");
+   const std::string& target("/map");
    const std::string& root(req.cloud.header.frame_id);
-   ros::Time current_transform = ros::Time::now();
+   ros::Time current_transform = ros::Time(0);
    tf::StampedTransform transform;
    pcl::PointCloud<pcl::PointXYZRGB> out_cloud;
    sensor_msgs::PointCloud2 new_out_cloud;
    ROS_INFO("WAITING");
    std::cout<< "TARGET:" << target << std::endl;
    std::cout<< "ORIGIN:" << root << std::endl;
+   std::string* err;
 
-   listener.waitForTransform(target, root, current_transform, ros::Duration(10.0) );
-  // std::string err;
+   ROS_INFO("Setting up listener");
+   ros::Duration(2).sleep();
 
-  std::string* err;
+  bool success = false;
 
-   listener.lookupTransform(root, target, current_transform, transform);
-   ROS_INFO("TRANSFORMING");
+   // some horrible looking stuff from stackoverflow
+   while(!success) {
+   try {
+	ROS_INFO("Waiting for transform topics");
+	 listener.waitForTransform(target, root, current_transform, ros::Duration(10.0) );
+	ROS_INFO("Looking up transform");
+  	 listener.lookupTransform(target, root, current_transform, transform);
+	ROS_INFO("Done!");
+   success = true;
+   } catch (tf::ExtrapolationException e) {
+	ROS_INFO("WAITING TO GET TRANSFORM BETWEEN MAP AND CAMERA");
+   }
+ ros::Duration(0.1).sleep(); 
+}
+
+ ROS_INFO("TRANSFORMING");
 
    pcl::PCLPointCloud2 pcl_pc2;
    pcl_conversions::toPCL(req.cloud,pcl_pc2);
@@ -324,7 +341,10 @@ bham_seg_filter::bham_seg::Response &res)
   pcl::compute3DCentroid (temp_cloud, beforecentroid);
   std::cout << " CENTROID BEFORE: " << beforecentroid[0] << " : " << beforecentroid[1] << " : " << beforecentroid[2] << " : " << beforecentroid[3] << std::endl;
 
-  pcl_ros::transformPointCloud (target,temp_cloud,out_cloud, listener);
+//  pcl_ros::transformPointCloud (target,temp_cloud,out_cloud, listener);
+   pcl_ros::transformPointCloud(temp_cloud,out_cloud,transform);
+
+
   Eigen::Vector4f aftercentroid;
   pcl::compute3DCentroid (out_cloud, aftercentroid);
   std::cout << " CENTROID AFTER: " << aftercentroid[0] << " : " << aftercentroid[1] << " : " << aftercentroid[2] << " : " << aftercentroid[3] << std::endl;
