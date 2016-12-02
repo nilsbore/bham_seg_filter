@@ -49,7 +49,7 @@ using namespace sensor_msgs;
 
 class SegmentFilter{
   tf::TransformListener listener;
-  
+
   ros::NodeHandle* node;
 
   ros::Publisher plane_pub;
@@ -130,10 +130,10 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
 //  pcl::io::loadPCDFile<pcl::PointXYZRGB> ("3.pcd", *col_cloud);
 
 //    writer.write<pcl::PointXYZRGB> ("cc.pcd", *col_cloud, false);
-//  pcl::VoxelGrid<pcl::PointXYZ> sor;
+//  pcl::VoxelGrid<pcl::PointXYZRGB> sor;
 //  sor.setInputCloud (temp_cloud);
-//  sor.setLeafSize (0.1f, 0.1f, 0.1f);
-//  sor.filter (*ffcloud);
+//  sor.setLeafSize (0.02f, 0.02f, 0.02f);
+//  sor.filter (*temp_cloud);
 //  writer.write<pcl::PointXYZ> ("gridfil.pcd", *ffcloud, false);
 //temp_cloud = ffcloud;
 
@@ -190,14 +190,14 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
   // Optional
   seg.setOptimizeCoefficients (true);
   // Mandatory
-  seg.setModelType (pcl::SACMODEL_NORMAL_PLANE );
+  seg.setModelType (pcl::SACMODEL_PERPENDICULAR_PLANE  );
   seg.setMethodType (pcl::SAC_RANSAC);
   seg.setDistanceThreshold (0.015);
   seg.setInputNormals (cloud_normals);
   seg.setNormalDistanceWeight (0.001);
   seg.setMaxIterations(1000);
-//  seg.setEpsAngle(pcl::deg2rad(3.0)); // degrees to radians
-//  seg.setAxis(Eigen::Vector3f(0.0,0.0,1.0));
+  seg.setEpsAngle(pcl::deg2rad(20.0)); // degrees to radians
+  seg.setAxis(Eigen::Vector3f(0.0,0.0,1.0));
   seg.setInputCloud (temp_cloud);
   seg.segment (*inliers, *coefficients);
 
@@ -214,6 +214,7 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
   // do ransac stuff
 
 
+  // this extracts the plane from the pc
   pcl::ExtractIndices<pcl::PointXYZRGB> extract;
   extract.setInputCloud (temp_cloud);
   extract.setIndices (inliers);
@@ -221,14 +222,53 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
   extract.setKeepOrganized(true);
   extract.filter(*filtered_cloud);
 
+  float a = coefficients->values[0];
+  float b = coefficients->values[1];
+  float c = coefficients->values[2];
+  float d = coefficients->values[3];
+
+
+  pcl::PointIndices::Ptr below_plane_indices (new pcl::PointIndices);
+  int above_plane = 0;
+  int below_plane = 0;
+  for (size_t i = 0; i < filtered_cloud->size(); ++i)
+  {
+    pcl::PointXYZRGB cur_point = filtered_cloud->at(i);
+
+    float co = (a * cur_point.x) + (b * cur_point.y) + (c * cur_point.z) + d;
+    if(co > 0.02) {
+      above_plane++;
+    } else {
+      below_plane_indices->indices.push_back(i);
+      below_plane++;
+    }
+
+  }
+
+  std::cout << "ABOVE PLANE: " << above_plane << std::endl;
+  std::cout << "BELOW PLANE: " << below_plane << std::endl;
+
+
+
   pcl::ExtractIndices<pcl::PointXYZRGB> extract_plane;
   extract.setInputCloud (temp_cloud);
   extract.setIndices (inliers);
-  extract.setNegative (false);
+  extract.setNegative (true);
   extract.filter(*filtered_plane);
   sensor_msgs::PointCloud2 pc;
   pcl::toROSMsg (*filtered_plane, pc);
   plane_pub.publish(pc);
+
+  pcl::ExtractIndices<pcl::PointXYZRGB> extract_below_plane;
+  extract_below_plane.setInputCloud (filtered_cloud);
+  extract_below_plane.setIndices (below_plane_indices);
+  extract_below_plane.setNegative (true);
+  extract_below_plane.setKeepOrganized(true);
+  extract_below_plane.filter(*filtered_cloud);
+
+  pcl::PCDWriter writer;
+  writer.write<pcl::PointXYZRGB> ("BELOW_PLANE_REMOVED.pcd", *filtered_cloud, false);
+  writer.write<pcl::PointXYZRGB> ("PLANE.pcd", *filtered_plane, false);
 
 //  sensor_msgs::Image image_;
 //  sensor_msgs::PointCloud2 pc;
@@ -313,8 +353,10 @@ bham_seg_filter::bham_seg::Response &res)
   bool success = false;
 
    // some horrible looking stuff from stackoverflow
-   while(!success) {
+   int runs = 0;
+   while(!success && runs < 30) {
    try {
+     runs++;
 	ROS_INFO("Waiting for transform topics");
 	 listener.waitForTransform(target, root, current_transform, ros::Duration(10.0) );
 	ROS_INFO("Looking up transform");
@@ -324,7 +366,7 @@ bham_seg_filter::bham_seg::Response &res)
    } catch (tf::ExtrapolationException e) {
 	ROS_INFO("WAITING TO GET TRANSFORM BETWEEN MAP AND CAMERA");
    }
- ros::Duration(0.1).sleep(); 
+ ros::Duration(0.1).sleep();
 }
 
  ROS_INFO("TRANSFORMING");
