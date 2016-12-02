@@ -208,6 +208,12 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
 
   std::cerr << "Model inliers: " << inliers->indices.size () << std::endl;
 
+  if(inliers->indices.size() == 0) {
+    ROS_ERROR("No inliers to the plane model found. Quitting!");
+    sensor_msgs::PointCloud2 empty_cloud;
+    return empty_cloud;
+  }
+
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_plane(new pcl::PointCloud<pcl::PointXYZRGB>);
 
@@ -266,9 +272,9 @@ sensor_msgs::PointCloud2 SegmentFilter::ransac_filter(sensor_msgs::PointCloud2 i
   extract_below_plane.setKeepOrganized(true);
   extract_below_plane.filter(*filtered_cloud);
 
-  pcl::PCDWriter writer;
-  writer.write<pcl::PointXYZRGB> ("BELOW_PLANE_REMOVED.pcd", *filtered_cloud, false);
-  writer.write<pcl::PointXYZRGB> ("PLANE.pcd", *filtered_plane, false);
+//  pcl::PCDWriter writer;
+//  writer.write<pcl::PointXYZRGB> ("BELOW_PLANE_REMOVED.pcd", *filtered_cloud, false);
+//  writer.write<pcl::PointXYZRGB> ("PLANE.pcd", *filtered_plane, false);
 
 //  sensor_msgs::Image image_;
 //  sensor_msgs::PointCloud2 pc;
@@ -396,8 +402,17 @@ bham_seg_filter::bham_seg::Response &res)
 
   sensor_msgs::PointCloud2 roi_filtered_cloud = roi_crop(new_out_cloud,req.posearray);
 
-
   sensor_msgs::PointCloud2 filtered_cloud = ransac_filter(roi_filtered_cloud);
+
+  pcl::PCLPointCloud2 t_pc2;
+  pcl_conversions::toPCL(filtered_cloud,t_pc2);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr test_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::fromPCLPointCloud2(t_pc2,*test_cloud);
+
+  if(test_cloud->points.size() == 0) {
+    ROS_ERROR("Unable to find plane, not segmenting any further.");
+    return false;
+  }
 
   ros::ServiceClient vienna_seg = node->serviceClient<segmentation_srv_definitions::segment>("/object_gestalt_segmentation");
 
