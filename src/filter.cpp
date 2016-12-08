@@ -103,9 +103,10 @@ sensor_msgs::PointCloud2 SegmentFilter::roi_crop(sensor_msgs::PointCloud2 input_
   crop.setNegative(false);
   crop.setKeepOrganized(true);
   crop.filter(xyz_filtered_cloud);
+  //std::cout << "TOTAL POINTS IN CROPPED CLOUD: " << xyz_filtered_cloud->points.size() << std::endl;
 //  pcl::PCDWriter writer;
 //  writer.write<pcl::PointXYZRGB> ("crop.pcd", xyz_filtered_cloud, false);
-  ROS_INFO("DONE  CROP BOX");
+  ROS_INFO("DONE CROP BOX");
   sensor_msgs::PointCloud2 output_cloud;
   pcl::toROSMsg(xyz_filtered_cloud,output_cloud);
 
